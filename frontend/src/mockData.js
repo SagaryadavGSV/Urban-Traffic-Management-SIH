@@ -345,6 +345,37 @@ export function generateMockEvents(count = 20) {
   return events;
 }
 
+export function generatePlateSvg(plate) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="220" height="60" viewBox="0 0 220 60">
+    <rect x="2" y="2" width="216" height="56" rx="6" fill="#FFFFFF" stroke="#1E293B" stroke-width="3"/>
+    <rect x="2" y="2" width="26" height="56" rx="4" fill="#003399"/>
+    <circle cx="15" cy="22" r="5" fill="#FF9933"/>
+    <text x="15" y="44" font-family="Arial, sans-serif" font-size="9" font-weight="bold" fill="#FFFFFF" text-anchor="middle">IND</text>
+    <text x="122" y="40" font-family="'Courier New', monospace, 'Roboto Mono'" font-size="22" font-weight="900" fill="#111827" letter-spacing="2" text-anchor="middle">${plate}</text>
+  </svg>`;
+  return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+}
+
+export function generateFrameSvg(camName, plate, vType) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+    <rect width="640" height="360" fill="#0F172A"/>
+    <polygon points="40,360 260,160 380,160 600,360" fill="#1E293B"/>
+    <line x1="200" y1="360" x2="300" y2="160" stroke="#E2E8F0" stroke-dasharray="14 10" stroke-width="3"/>
+    <line x1="440" y1="360" x2="340" y2="160" stroke="#E2E8F0" stroke-dasharray="14 10" stroke-width="3"/>
+    <rect x="230" y="190" width="180" height="120" rx="12" fill="#2563EB" opacity="0.85"/>
+    <rect x="220" y="175" width="200" height="145" fill="none" stroke="#22C55E" stroke-width="2.5" stroke-dasharray="8 4"/>
+    <rect x="220" y="155" width="140" height="20" fill="#22C55E"/>
+    <text x="225" y="169" font-family="Arial" font-size="11" font-weight="bold" fill="#000">${(vType || "CAR").toUpperCase()} 98%</text>
+    <rect x="270" y="260" width="105" height="30" fill="#FFFFFF" stroke="#EAB308" stroke-width="2"/>
+    <text x="322" y="280" font-family="monospace" font-size="12" font-weight="bold" fill="#000" text-anchor="middle">${plate}</text>
+    <rect x="0" y="0" width="640" height="34" fill="#000000" opacity="0.75"/>
+    <text x="14" y="22" font-family="monospace" font-size="12" fill="#F8FAFC">VADODARA SMART CITY // ${camName}</text>
+    <circle cx="560" cy="17" r="5" fill="#EF4444"/>
+    <text x="572" y="22" font-family="monospace" font-size="11" fill="#EF4444" font-weight="bold">CCTV</text>
+  </svg>`;
+  return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+}
+
 export function generateMockTrajectory(plate) {
   const norm = (plate || "GJ06AB1234").replace(/[^A-Z0-9]/gi, "").toUpperCase();
   const camOrder = [
@@ -355,37 +386,113 @@ export function generateMockTrajectory(plate) {
   ];
 
   const now = Date.now();
-  const sightings = camOrder.map((cam, idx) => ({
-    sighting_id: `SGT-${norm}-${idx + 1}`,
-    camera_id: cam.camera_id,
-    camera_name: cam.name,
-    latitude: cam.latitude,
-    longitude: cam.longitude,
-    timestamp_utc: new Date(now - (camOrder.length - 1 - idx) * 180000).toISOString(),
-    speed_kmh: 42 + idx * 4,
-    distance_from_prev_km: idx === 0 ? 0 : 1.6,
-    speed_feasibility: "PLAUSIBLE",
-    confidence: 0.96,
-    vehicle_type: norm.includes("DL") ? "car" : "suv"
-  }));
+  const vType = norm.includes("CC") || norm.includes("DL") ? "car" : "suv";
+  const plateSvg = generatePlateSvg(norm);
+
+  const legs = [
+    { distance_km: 1.9, minutes: 2.8, speed_kmh: 40.7 },
+    { distance_km: 1.2, minutes: 1.8, speed_kmh: 40.0 },
+    { distance_km: 1.5, minutes: 2.1, speed_kmh: 42.8 }
+  ];
+
+  const isClone = norm === "MH02EE7722";
+  const isStolen = norm === "GJ06CC9901" || norm === "DL03CC9901";
+
+  const sightings = camOrder.map((cam, idx) => {
+    const elapsedMinutes = idx === 0 ? 0 : legs.slice(0, idx).reduce((a, b) => a + b.minutes, 0);
+    const time = new Date(now - (6.7 - elapsedMinutes) * 60000).toISOString();
+    return {
+      sighting_id: `SGT-${norm}-${idx + 1}`,
+      camera_id: cam.camera_id,
+      camera_name: cam.name,
+      road_zone: cam.road_zone,
+      direction: cam.direction,
+      latitude: cam.latitude,
+      longitude: cam.longitude,
+      timestamp_utc: time,
+      speed_kmh: 38 + idx * 3,
+      distance_from_prev_km: idx === 0 ? 0 : legs[idx - 1].distance_km,
+      speed_feasibility: "PLAUSIBLE",
+      confidence: 0.96,
+      ocr_confidence: 0.96,
+      vehicle_type: vType,
+      evidence_plate_crop: plateSvg,
+      evidence_frame_path: generateFrameSvg(cam.name, norm, vType)
+    };
+  });
+
+  const chowks_passed = camOrder.map((cam, idx) => {
+    const leg = idx < legs.length ? legs[idx] : null;
+    return {
+      step: idx + 1,
+      chowk_name: cam.name,
+      camera_id: cam.camera_id,
+      road_zone: cam.road_zone,
+      direction: cam.direction,
+      timestamp_utc: sightings[idx].timestamp_utc,
+      latitude: cam.latitude,
+      longitude: cam.longitude,
+      is_last: idx === camOrder.length - 1,
+      next_chowk: leg ? camOrder[idx + 1].name : null,
+      distance_to_next_km: leg ? leg.distance_km : null,
+      time_to_next_min: leg ? leg.minutes : null,
+      speed_to_next_kmh: leg ? leg.speed_kmh : null,
+      evidence_plate_crop: plateSvg,
+      evidence_frame_path: generateFrameSvg(cam.name, norm, vType),
+      ocr_confidence: 0.96,
+      vehicle_type: vType
+    };
+  });
+
+  const totalDist = 4.6;
+  const totalMin = 6.7;
+  const avgSpeed = isClone ? 1374.0 : 41.2;
+
+  let speed_status = "Compliant (Within 50 km/h Statutory Urban Limit)";
+  let speed_badge = "compliant";
+
+  if (isClone) {
+    speed_status = "Implausible Velocity (> 120 km/h Cloned Plate Alert)";
+    speed_badge = "critical";
+  } else if (avgSpeed > 50) {
+    speed_status = "Over-speeding Alert (> 50 km/h Vadodara Municipal Limit)";
+    speed_badge = "overspeed";
+  }
+
+  const aiSummary = isClone
+    ? `CRITICAL ALERT: Vehicle registration ${norm} exhibited impossible travel between Makarpura and Alkapuri within seconds, indicating a cloned license plate operating concurrently in two zones.`
+    : isStolen
+    ? `SECURITY WATCHLIST HIT: Vehicle ${norm} matched against Stolen Vehicle FIR-2026-CR-89412. Tracked across 4 Vadodara signals with route concluding at Akota - Dandia Bazar Bridge.`
+    : `Vehicle ${norm} was tracked across 4 major 4-lane traffic signals in Vadodara, entering at ${camOrder[0].name} and concluding at ${camOrder[3].name}. Total urban corridor distance traveled: ${totalDist} km in ${totalMin} minutes. Calculated average speed is ${avgSpeed} km/h, which is ${speed_status}.`;
 
   return {
-    plate_text: norm,
+    found: true,
+    plate: norm,
     total_sightings: sightings.length,
-    first_seen: sightings[0].timestamp_utc,
-    last_seen: sightings[sightings.length - 1].timestamp_utc,
+    total_chowks: sightings.length,
+    first_sighting: sightings[0].timestamp_utc,
+    last_sighting: sightings[sightings.length - 1].timestamp_utc,
+    first_camera: camOrder[0].name,
+    last_camera: camOrder[camOrder.length - 1].name,
+    total_distance_km: totalDist,
+    total_transit_time_min: totalMin,
+    overall_average_speed_kmh: avgSpeed,
+    speed_status: speed_status,
+    speed_badge: speed_badge,
+    chowks_passed: chowks_passed,
+    ai_route_summary: aiSummary,
+    average_confidence: 0.96,
     sightings: sightings,
-    chowks_passed: sightings.map(s => s.camera_name),
-    route_gaps: [
-      {
-        from_camera: "Alkapuri R.C. Dutt Road Chowk",
-        to_camera: "Railway Station Central Junction Chowk",
-        distance_km: 1.2,
-        expected_minutes: 3.5,
-        actual_minutes: 3.0,
-        gap_status: "NORMAL_PROGRESSION"
-      }
-    ],
-    anomalies_detected: norm === "MH02EE7722" ? ["CLONED_PLATE_IMPOSSIBLE_SPEED"] : []
+    trajectory_segments: legs.map((l, i) => ({
+      segment_index: i + 1,
+      from_camera_name: camOrder[i].name,
+      to_camera_name: camOrder[i + 1].name,
+      distance_km: l.distance_km,
+      elapsed_minutes: l.minutes,
+      speed_kmh: l.speed_kmh,
+      status: "Plausible"
+    })),
+    plausibility: [],
+    audit_note: `Search logged under Case #CASE-2026-VADODARA01`
   };
 }
